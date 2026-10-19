@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-sensor.py – Liest einen BME280 bzw. BMP280 über I2C aus.
+sensor.py – Liest einen BME280 bzw. BMP280 über I2C aus und zeigt die
+Werte in der Konsole und (falls vorhanden) auf einem OLED-Display an.
 
 Hardware:  Raspberry Pi Zero W, Sensor an I2C-Bus 1, Adresse 0x76
-Abhängigkeit: nur smbus2 (sudo apt install python3-smbus2)
+           optional: 1,3"-OLED (SH1106, 128x64) an I2C-Bus 1, Adresse 0x3C
+Abhängigkeiten: smbus2, optional luma.oled (für das Display)
 
 Funktionsweise in Kurzform:
   1. Chip-ID lesen       -> BME280 (0x60) oder BMP280 (0x58)?
@@ -19,12 +21,25 @@ import time
 
 from smbus2 import SMBus
 
+# luma.oled ist optional: Fehlt die Bibliothek, läuft das Skript nur mit
+# Konsolenausgabe weiter.
+try:
+    from luma.core.interface.serial import i2c as luma_i2c
+    from luma.core.render import canvas
+    from luma.oled.device import sh1106
+    from PIL import ImageFont
+except ImportError:
+    sh1106 = None
+
 # ---------------------------------------------------------------------------
 # Konfiguration
 # ---------------------------------------------------------------------------
 I2C_BUS = 1          # Am Pi liegen GPIO2 (SDA) / GPIO3 (SCL) auf Bus 1
 I2C_ADRESSE = 0x76   # 0x76 wenn SDO auf GND, 0x77 wenn SDO auf VCC
 INTERVALL_S = 2.0    # Abstand zwischen zwei Messungen in Sekunden
+
+OLED_ADRESSE = 0x3C  # SH1106-Display, gleicher I2C-Bus wie der Sensor
+OLED_SCHRIFT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
 # ---------------------------------------------------------------------------
 # Register-Adressen (siehe Datenblatt, "Memory map")
@@ -171,7 +186,9 @@ class BME280:
         #   osrs_p = 001 -> Druck 1-fach abtasten
         #   mode   = 01  -> Forced Mode: eine Messung, danach Sleep
         # Das ist der vom Datenblatt empfohlene Modus für Wetterstationen
-        # (geringer Stromverbrauch, kaum Eigenerwärmung).
+        # (geringer Stromverbrauch, kaum Eigenerwärmung). Im Normal Mode
+        # (mode = 11) würde der Sensor dagegen ununterbrochen messen und
+        # sich dabei messbar selbst aufheizen.
         self.bus.write_byte_data(self.adr, REG_CTRL_MEAS, 0b001_001_01)
 
         # Warten, bis die Messung fertig ist (Status-Bit 3 = "measuring").
@@ -244,9 +261,58 @@ class BME280:
 
 
 # ---------------------------------------------------------------------------
+# OLED-Anzeige
+# ---------------------------------------------------------------------------
+class Anzeige:
+    """Zeigt die Messwerte auf einem SH1106-OLED (128x64) an.
+
+    Ist kein Display angeschlossen (oder luma.oled nicht installiert), ist
+    self.device None und anzeigen() tut einfach nichts.
+    """
+
+    def __init__(self, bus_nr, adresse):
+        self.device = None
+        if sh1106 is None:
+            print("Hinweis: luma.oled nicht installiert – nur Konsolenausgabe.")
+            return
+        try:
+            serial = luma_i2c(port=bus_nr, address=adresse)
+            self.device = sh1106(serial, width=128, height=64)
+        except Exception as e:  # z. B. DeviceNotFoundError, OSError
+            print(f"Hinweis: Kein Display an 0x{adresse:02X} ({e}) – "
+                  "nur Konsolenausgabe.")
+            return
+        try:
+            self.schrift = ImageFont.truetype(OLED_SCHRIFT, 15)
+        except OSError:
+            self.schrift = ImageFont.load_default()
+        print(f"SH1106-Display gefunden an Adresse 0x{adresse:02X}.")
+
+    def anzeigen(self, temp, druck, feuchte):
+        if self.device is None:
+            return
+        zeilen = [f"{temp:5.1f} °C", f"{druck:6.1f} hPa"]
+        if feuchte is not None:
+            zeilen.append(f"{feuchte:5.1f} %rF")
+        try:
+            # canvas() zeichnet in ein Bild im Speicher und schickt es am
+            # Ende des with-Blocks in einem Rutsch ans Display.
+            with canvas(self.device) as zeichnung:
+                for i, text in enumerate(zeilen):
+                    zeichnung.text((4, 2 + i * 21), text,
+                                   font=self.schrift, fill="white")
+        except OSError as e:
+            # Display im Betrieb abgezogen o. Ä.: ab jetzt nur noch Konsole.
+            print(f"Hinweis: Display antwortet nicht mehr ({e}) – "
+                  "nur noch Konsolenausgabe.")
+            self.device = None
+
+
+# ---------------------------------------------------------------------------
 # Hauptprogramm
 # ---------------------------------------------------------------------------
 def main():
+    anzeige = Anzeige(I2C_BUS, OLED_ADRESSE)
     with SMBus(I2C_BUS) as bus:
         sensor = BME280(bus, I2C_ADRESSE)
         print(f"{sensor.name} gefunden an Bus {I2C_BUS}, "
@@ -259,6 +325,7 @@ def main():
             if feuchte is not None:
                 zeile += f"   Feuchte: {feuchte:5.1f} %"
             print(zeile, flush=True)
+            anzeige.anzeigen(temp, druck, feuchte)
             time.sleep(INTERVALL_S)
 
 
