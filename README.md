@@ -3,7 +3,7 @@
 A Raspberry Pi Zero W that measures **temperature, humidity and air pressure** with a Bosch BME280 and shows the live readings on a small OLED display.
 The BME280 driver is written from scratch on top of raw I2C register access, including the sensor's factory calibration.
 
-This is the first stage of a full-stack IoT project: next, the Pi will publish its readings via MQTT to a backend with a database, REST API and web dashboard (see [Roadmap](#-roadmap)).
+This is the first stage of a full-stack IoT project: the Pi already publishes its readings via MQTT; next comes a backend with a database, REST API and web dashboard (see [Roadmap](#-roadmap)).
 
 <p align="center">
   <img src="docs/images/demo.gif" alt="Live readings on the OLED display" width="45%">
@@ -24,6 +24,7 @@ This is the first stage of a full-stack IoT project: next, the Pi will publish i
 - **Forced mode** instead of continuous measuring, to minimise self-heating of the sensor
 - Live output on a **1.3" SH1106 OLED** (128×64) via `luma.oled`
 - Keeps running with console output only if the display or `luma.oled` is missing
+- Publishes every reading as **JSON via MQTT** (`paho-mqtt`), with automatic reconnect if the broker is unreachable
 
 ---
 
@@ -129,7 +130,7 @@ BME280 gefunden an Bus 1, Adresse 0x76. Abbrechen mit Strg+C.
 
 - [x] Read BME280 over I2C with an own driver
 - [x] Show readings on the OLED
-- [ ] Publish readings via **MQTT** (Mosquitto broker)
+- [x] Publish readings via **MQTT** (Mosquitto broker)
 - [ ] Backend with **FastAPI** + **SQLite**, REST API
 - [ ] Web dashboard with history charts
 - [ ] Docker Compose, tests, GitHub Actions CI
