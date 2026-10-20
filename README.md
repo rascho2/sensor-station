@@ -67,8 +67,28 @@ cd sensor-station
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 
-# Run
+# Run (display + console only)
 venv/bin/python sensor.py
+
+# Run and also publish every reading via MQTT
+venv/bin/python sensor.py --mqtt-host 172.20.10.6            # port defaults to 1883
+venv/bin/python sensor.py --mqtt-host 172.20.10.6 --mqtt-port 1884
+```
+
+### MQTT
+
+With `--mqtt-host`, every reading is published (QoS 0) to the topic `sensorstation/<hostname>/messwerte`, e.g. `sensorstation/sensorpi/messwerte`:
+
+```json
+{"timestamp": "2026-10-20T15:42:07+02:00", "temperature_c": 23.41, "pressure_hpa": 1012.37, "humidity_pct": 48.2}
+```
+
+`humidity_pct` is `null` on a BMP280. If the broker is unreachable or the connection drops, measuring and the display keep running; the script prints a note once and reconnects automatically in the background. The broker address is a command-line argument because the IP can change (e.g. on a phone hotspot).
+
+To watch the messages on the broker machine:
+
+```bash
+mosquitto_sub -h localhost -t 'sensorstation/#' -v
 ```
 
 Example output:

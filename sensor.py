@@ -2,10 +2,14 @@
 """
 sensor.py – Liest einen BME280 bzw. BMP280 über I2C aus und zeigt die
 Werte in der Konsole und (falls vorhanden) auf einem OLED-Display an.
+Optional wird jede Messung zusätzlich per MQTT als JSON verschickt.
 
 Hardware:  Raspberry Pi Zero W, Sensor an I2C-Bus 1, Adresse 0x76
            optional: 1,3"-OLED (SH1106, 128x64) an I2C-Bus 1, Adresse 0x3C
-Abhängigkeiten: smbus2, optional luma.oled (für das Display)
+Abhängigkeiten: smbus2, optional luma.oled (für das Display),
+                optional paho-mqtt >= 2.0 (für MQTT)
+
+Aufruf:  venv/bin/python sensor.py [--mqtt-host 172.20.10.6] [--mqtt-port 1883]
 
 Funktionsweise in Kurzform:
   1. Chip-ID lesen       -> BME280 (0x60) oder BMP280 (0x58)?
@@ -17,7 +21,11 @@ Funktionsweise in Kurzform:
                              (Formeln aus dem Bosch-Datenblatt, Kapitel 4.2.3 / 8.1).
 """
 
+import argparse
+import json
+import socket
 import time
+from datetime import datetime
 
 from smbus2 import SMBus
 
@@ -31,6 +39,13 @@ try:
 except ImportError:
     sh1106 = None
 
+# paho-mqtt ist ebenfalls optional: Ohne die Bibliothek (oder ohne
+# --mqtt-host) wird einfach nichts verschickt.
+try:
+    import paho.mqtt.client as mqtt
+except ImportError:
+    mqtt = None
+
 # ---------------------------------------------------------------------------
 # Konfiguration
 # ---------------------------------------------------------------------------
@@ -40,6 +55,9 @@ INTERVALL_S = 2.0    # Abstand zwischen zwei Messungen in Sekunden
 
 OLED_ADRESSE = 0x3C  # SH1106-Display, gleicher I2C-Bus wie der Sensor
 OLED_SCHRIFT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+MQTT_PORT = 1883                  # Standard-Port für unverschlüsseltes MQTT
+MQTT_TOPIC = "sensorstation/{hostname}/messwerte"
 
 # ---------------------------------------------------------------------------
 # Register-Adressen (siehe Datenblatt, "Memory map")
@@ -309,10 +327,114 @@ class Anzeige:
 
 
 # ---------------------------------------------------------------------------
+# MQTT
+# ---------------------------------------------------------------------------
+class MqttSender:
+    """Verschickt die Messwerte als JSON an einen MQTT-Broker.
+
+    Verbindungsaufbau und Reconnect laufen in einem Hintergrund-Thread von
+    paho-mqtt (loop_start). Ist der Broker nicht erreichbar, wird die
+    Messung einfach nicht verschickt – Messung und Display laufen weiter.
+    Ist kein Host angegeben (oder paho-mqtt fehlt), tut senden() nichts.
+    """
+
+    def __init__(self, host, port):
+        self.client = None
+        if host is None:
+            print("Hinweis: Kein --mqtt-host angegeben – MQTT ist aus.")
+            return
+        if mqtt is None:
+            print("Hinweis: paho-mqtt nicht installiert – MQTT ist aus.")
+            return
+
+        self.host, self.port = host, port
+        self.topic = MQTT_TOPIC.format(hostname=socket.gethostname())
+        # Merkt sich, ob "nicht verbunden" schon gemeldet wurde, damit die
+        # Konsole nicht alle 2 Sekunden mit demselben Hinweis zugemüllt wird.
+        self.fehler_gemeldet = False
+        self.beendet = False   # gewolltes Trennen nicht als Fehler melden
+
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        self.client.on_connect = self._bei_verbindung
+        self.client.on_disconnect = self._bei_trennung
+        self.client.on_connect_fail = self._bei_verbindungsfehler
+        # Wartezeit zwischen Reconnect-Versuchen: 1 s, verdoppelt bis max. 30 s
+        self.client.reconnect_delay_set(min_delay=1, max_delay=30)
+        # connect_async() blockiert nicht und wirft keine Exception, wenn der
+        # Broker fehlt – der Hintergrund-Thread versucht es immer wieder.
+        self.client.connect_async(host, port, keepalive=30)
+        self.client.loop_start()
+        print(f"MQTT: verbinde mit {host}:{port}, Topic '{self.topic}'.")
+
+    def _bei_verbindung(self, client, userdata, flags, reason_code, properties):
+        if reason_code.is_failure:
+            self._melde(f"Broker lehnt Verbindung ab ({reason_code})")
+            return
+        # Zeilenumbruch im String statt per print(): Diese Callbacks laufen im
+        # MQTT-Thread, so vermischt sich die Zeile nicht mit der Messausgabe.
+        print(f"MQTT: verbunden mit {self.host}:{self.port}.\n", end="",
+              flush=True)
+        self.fehler_gemeldet = False
+
+    def _bei_trennung(self, client, userdata, flags, reason_code, properties):
+        if self.beendet:
+            return
+        self._melde(f"Verbindung getrennt ({reason_code})")
+
+    def _bei_verbindungsfehler(self, client, userdata):
+        self._melde(f"Broker {self.host}:{self.port} nicht erreichbar")
+
+    def _melde(self, grund):
+        if not self.fehler_gemeldet:
+            print(f"Hinweis: MQTT – {grund}. Neuer Versuch läuft im "
+                  "Hintergrund, Messung geht weiter.\n", end="", flush=True)
+            self.fehler_gemeldet = True
+
+    def senden(self, temp, druck, feuchte):
+        if self.client is None or not self.client.is_connected():
+            return
+        nachricht = {
+            # Ortszeit mit Zeitzonen-Offset, z. B. 2026-10-20T15:42:07+02:00
+            "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "temperature_c": round(temp, 2),
+            "pressure_hpa": round(druck, 2),
+            # Beim BMP280 None -> in JSON null
+            "humidity_pct": None if feuchte is None else round(feuchte, 1),
+        }
+        self.client.publish(self.topic, json.dumps(nachricht), qos=0)
+
+    def beenden(self):
+        if self.client is not None:
+            self.beendet = True
+            self.client.disconnect()
+            self.client.loop_stop()
+
+
+# ---------------------------------------------------------------------------
 # Hauptprogramm
 # ---------------------------------------------------------------------------
-def main():
+def lies_argumente():
+    parser = argparse.ArgumentParser(
+        description="BME280/BMP280 auslesen, auf dem OLED anzeigen und "
+                    "optional per MQTT verschicken.")
+    parser.add_argument("--mqtt-host",
+                        help="IP oder Hostname des MQTT-Brokers "
+                             "(ohne Angabe ist MQTT aus)")
+    parser.add_argument("--mqtt-port", type=int, default=MQTT_PORT,
+                        help=f"Port des MQTT-Brokers (Standard: {MQTT_PORT})")
+    return parser.parse_args()
+
+
+def main(args):
     anzeige = Anzeige(I2C_BUS, OLED_ADRESSE)
+    sender = MqttSender(args.mqtt_host, args.mqtt_port)
+    try:
+        messschleife(anzeige, sender)
+    finally:
+        sender.beenden()
+
+
+def messschleife(anzeige, sender):
     with SMBus(I2C_BUS) as bus:
         sensor = BME280(bus, I2C_ADRESSE)
         print(f"{sensor.name} gefunden an Bus {I2C_BUS}, "
@@ -326,11 +448,12 @@ def main():
                 zeile += f"   Feuchte: {feuchte:5.1f} %"
             print(zeile, flush=True)
             anzeige.anzeigen(temp, druck, feuchte)
+            sender.senden(temp, druck, feuchte)
             time.sleep(INTERVALL_S)
 
 
 if __name__ == "__main__":
     try:
-        main()
+        main(lies_argumente())
     except KeyboardInterrupt:
         print("\nBeendet.")
