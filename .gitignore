@@ -2,3 +2,9 @@ venv/
 .venv/
 __pycache__/
 *.pyc
+
+# Backend
+*.db
+*.db-wal
+*.db-shm
+.pytest_cache/

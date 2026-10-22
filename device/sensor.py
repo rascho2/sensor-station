@@ -9,7 +9,7 @@ Hardware:  Raspberry Pi Zero W, Sensor an I2C-Bus 1, Adresse 0x76
 Abhängigkeiten: smbus2, optional luma.oled (für das Display),
                 optional paho-mqtt >= 2.0 (für MQTT)
 
-Aufruf:  venv/bin/python sensor.py [--mqtt-host 172.20.10.6] [--mqtt-port 1883]
+Aufruf (im Ordner device/):  venv/bin/python sensor.py [--mqtt-host 172.20.10.6] [--mqtt-port 1883]
 
 Funktionsweise in Kurzform:
   1. Chip-ID lesen       -> BME280 (0x60) oder BMP280 (0x58)?

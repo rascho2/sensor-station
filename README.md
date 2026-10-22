@@ -3,13 +3,23 @@
 A Raspberry Pi Zero W that measures **temperature, humidity and air pressure** with a Bosch BME280 and shows the live readings on a small OLED display.
 The BME280 driver is written from scratch on top of raw I2C register access, including the sensor's factory calibration.
 
-This is the first stage of a full-stack IoT project: the Pi already publishes its readings via MQTT; next comes a backend with a database, REST API and web dashboard (see [Roadmap](#-roadmap)).
+This is the first stage of a full-stack IoT project: the Pi publishes its readings via MQTT, and a FastAPI backend on the laptop stores them in SQLite and serves them over a REST API. Next comes a web dashboard (see [Roadmap](#-roadmap)).
 
 <p align="center">
   <img src="docs/images/demo.gif" alt="Live readings on the OLED display" width="45%">
   &nbsp;
   <img src="docs/images/station.jpg" alt="Raspberry Pi Zero W with BME280 sensor and OLED on a breadboard" width="45%">
 </p>
+
+---
+
+## 📁 Repository layout
+
+```
+device/    runs on the Raspberry Pi: BME280 driver, OLED, MQTT publisher
+backend/   runs on the laptop: MQTT subscriber, SQLite storage, REST API (FastAPI)
+docs/      images for this README
+```
 
 ---
 
@@ -54,7 +64,7 @@ Check the I2C bus with `i2cdetect -y 1`. It should show `3c` (OLED) and `76` (BM
 
 ---
 
-## 🚀 Setup & run
+## 🚀 Setup & run (device)
 
 On the Raspberry Pi:
 
@@ -64,7 +74,7 @@ sudo raspi-config nonint do_i2c 0
 
 # Get the code and install dependencies in a virtual environment
 git clone https://github.com/rascho2/sensor-station.git
-cd sensor-station
+cd sensor-station/device
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 
@@ -105,6 +115,83 @@ BME280 gefunden an Bus 1, Adresse 0x76. Abbrechen mit Strg+C.
 
 ---
 
+## 🖥️ Backend
+
+The backend runs on the laptop next to the Mosquitto broker. It subscribes to `sensorstation/+/messwerte`, validates every message, stores it in SQLite and serves the data over a REST API.
+
+### Start
+
+```bash
+cd backend
+python3 -m venv venv
+venv/bin/pip install -r requirements.txt        # requirements-dev.txt for the tests
+venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Interactive API docs (Swagger UI): <http://localhost:8000/docs>
+
+Configuration via environment variables:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `MQTT_HOST` | `localhost` | MQTT broker address |
+| `MQTT_PORT` | `1883` | MQTT broker port |
+| `MQTT_TOPIC` | `sensorstation/+/messwerte` | subscribed topic (`+` = any device) |
+| `DB_PATH` | `backend/data/sensorstation.db` | SQLite file (created automatically) |
+
+```bash
+MQTT_HOST=192.168.1.20 DB_PATH=/var/lib/sensorstation.db venv/bin/uvicorn app.main:app
+```
+
+### Endpoints
+
+| Method & path | Description |
+|---------------|-------------|
+| `GET /api/health` | `{"status": "ok" \| "degraded", "database": true, "mqtt_connected": true}` |
+| `GET /api/readings/latest` | newest reading, `404` if there is none yet |
+| `GET /api/readings?limit=100&since=<ISO 8601>` | readings, newest first; `limit` 1–1000 (default 100), `since` is inclusive and must include a time zone |
+
+```bash
+curl localhost:8000/api/readings/latest
+# {"device":"sensorpi","timestamp":"2026-10-22T13:47:00Z","temperature_c":25.92,"pressure_hpa":1002.31,"humidity_pct":63.5}
+
+curl -G localhost:8000/api/readings --data-urlencode "since=2026-10-22T15:00:00+02:00"
+```
+
+Timestamps are returned in UTC. In a URL, a `+` in the time zone offset must be encoded as `%2B` (`--data-urlencode` does that), or use `Z` for UTC.
+
+### Architecture
+
+```
+Raspberry Pi                    Laptop
+─────────────                   ──────────────────────────────────────────────────────
+device/sensor.py ──MQTT/JSON──▶ Mosquitto ──▶ backend (one Python process)
+                                                ├─ MQTT thread:  mqtt_subscriber.py
+                                                │                  → messages.py (validate)
+                                                │                  → db.py ──write──▶ SQLite
+                                                └─ uvicorn:      main.py (FastAPI)
+                                                                   → db.py ◀──read── SQLite
+                                                                        ▲
+                                              curl / dashboard ──HTTP───┘
+```
+
+- `app/mqtt_subscriber.py`: a paho-mqtt client running in a background thread. It connects asynchronously, so the API also starts when no broker is running, and it reconnects automatically. It re-subscribes after every reconnect. Every exception in the message callback is caught, because an uncaught one would stop the MQTT thread for good.
+- `app/messages.py`: turns topic + raw bytes into a validated `Reading`. The device name comes from the topic. The payload is checked with a strict pydantic model: no strings as numbers, time zone required, values within the BME280's measuring range. Invalid messages are logged and skipped. This module knows nothing about MQTT, which makes it testable without a broker.
+- `app/db.py`: plain `sqlite3`. All timestamps are normalised to UTC before storing, so they sort and compare correctly as text. One short-lived connection per operation and WAL mode let the MQTT thread write while API requests read.
+- `app/main.py`: FastAPI app factory. The *lifespan* creates the schema and starts/stops the subscriber with the server. Query parameters and responses are validated by FastAPI (`422` on bad input).
+
+### Tests
+
+```bash
+cd backend
+venv/bin/pip install -r requirements-dev.txt
+venv/bin/pytest
+```
+
+The tests use a temporary SQLite file per test and never need a broker: message parsing is tested directly, the MQTT callbacks are called with fake client/message objects, and the API runs with `start_mqtt=False` through FastAPI's `TestClient`.
+
+---
+
 ## 🧠 How the driver works
 
 1. **Identify the chip:** register `0xD0` returns `0x60` for a BME280 and `0x58` for a BMP280 (no humidity).
@@ -131,9 +218,9 @@ BME280 gefunden an Bus 1, Adresse 0x76. Abbrechen mit Strg+C.
 - [x] Read BME280 over I2C with an own driver
 - [x] Show readings on the OLED
 - [x] Publish readings via **MQTT** (Mosquitto broker)
-- [ ] Backend with **FastAPI** + **SQLite**, REST API
+- [x] Backend with **FastAPI** + **SQLite**, REST API
 - [ ] Web dashboard with history charts
-- [ ] Docker Compose, tests, GitHub Actions CI
+- [ ] Docker Compose, GitHub Actions CI
 
 ---
 
