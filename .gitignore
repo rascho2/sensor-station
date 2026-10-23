@@ -8,3 +8,6 @@ __pycache__/
 *.db-wal
 *.db-shm
 .pytest_cache/
+
+# Device-Konfiguration (nur die .example-Datei gehört ins Repo)
+sensorstation.env

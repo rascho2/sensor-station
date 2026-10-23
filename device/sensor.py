@@ -10,6 +10,8 @@ Abhängigkeiten: smbus2, optional luma.oled (für das Display),
                 optional paho-mqtt >= 2.0 (für MQTT)
 
 Aufruf (im Ordner device/):  venv/bin/python sensor.py [--mqtt-host 172.20.10.6] [--mqtt-port 1883]
+         Statt per Argument geht auch MQTT_HOST=... / MQTT_PORT=... als
+         Umgebungsvariable (so macht es der systemd-Dienst). Argumente haben Vorrang.
 
 Funktionsweise in Kurzform:
   1. Chip-ID lesen       -> BME280 (0x60) oder BMP280 (0x58)?
@@ -23,6 +25,7 @@ Funktionsweise in Kurzform:
 
 import argparse
 import json
+import os
 import socket
 import time
 from datetime import datetime
@@ -417,11 +420,17 @@ def lies_argumente():
     parser = argparse.ArgumentParser(
         description="BME280/BMP280 auslesen, auf dem OLED anzeigen und "
                     "optional per MQTT verschicken.")
-    parser.add_argument("--mqtt-host",
-                        help="IP oder Hostname des MQTT-Brokers "
-                             "(ohne Angabe ist MQTT aus)")
-    parser.add_argument("--mqtt-port", type=int, default=MQTT_PORT,
-                        help=f"Port des MQTT-Brokers (Standard: {MQTT_PORT})")
+    # Umgebungsvariablen als Standardwerte: Ein Argument auf der
+    # Kommandozeile überschreibt sie. Ein leeres MQTT_HOST= zählt als "aus".
+    parser.add_argument("--mqtt-host", default=os.environ.get("MQTT_HOST") or None,
+                        help="IP oder Hostname des MQTT-Brokers (Standard: "
+                             "Umgebungsvariable MQTT_HOST, sonst ist MQTT aus)")
+    # argparse wendet type=int auch auf einen String-Standardwert an und
+    # meldet z. B. MQTT_PORT=abc als verständlichen Fehler.
+    parser.add_argument("--mqtt-port", type=int,
+                        default=os.environ.get("MQTT_PORT") or MQTT_PORT,
+                        help="Port des MQTT-Brokers (Standard: Umgebungsvariable "
+                             f"MQTT_PORT, sonst {MQTT_PORT})")
     return parser.parse_args()
 
 

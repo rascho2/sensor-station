@@ -1,0 +1,18 @@
+[Unit]
+Description=Sensorstation: BME280 auslesen, OLED-Anzeige, MQTT
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=rashid
+WorkingDirectory=/home/rashid/sensor-station
+EnvironmentFile=/home/rashid/sensor-station/sensorstation.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/rashid/sensor-station/venv/bin/python sensor.py
+KillSignal=SIGINT
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -16,7 +16,7 @@ This is the first stage of a full-stack IoT project: the Pi publishes its readin
 ## 📁 Repository layout
 
 ```
-device/    runs on the Raspberry Pi: BME280 driver, OLED, MQTT publisher
+device/    runs on the Raspberry Pi: BME280 driver, OLED, MQTT publisher, systemd service
 backend/   runs on the laptop: MQTT subscriber, SQLite storage, REST API (FastAPI), web dashboard
 docs/      images for this README
 ```
@@ -66,25 +66,79 @@ Check the I2C bus with `i2cdetect -y 1`. It should show `3c` (OLED) and `76` (BM
 
 ## 🚀 Setup & run (device)
 
+On the Pi, the contents of `device/` live directly in `~/sensor-station` (next to the venv). Copy them over from the laptop:
+
+```bash
+# On the laptop, in the repo (sensorpi.local or the Pi's current IP)
+rsync -av --exclude '__pycache__' --exclude 'sensorstation.env' device/ rashid@sensorpi.local:sensor-station/
+```
+
 On the Raspberry Pi:
 
 ```bash
 # Enable I2C (once)
 sudo raspi-config nonint do_i2c 0
 
-# Get the code and install dependencies in a virtual environment
-git clone https://github.com/rascho2/sensor-station.git
-cd sensor-station/device
+# Install dependencies in a virtual environment
+cd ~/sensor-station
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 
-# Run (display + console only)
+# Run manually (display + console only)
 venv/bin/python sensor.py
 
 # Run and also publish every reading via MQTT
 venv/bin/python sensor.py --mqtt-host 172.20.10.6            # port defaults to 1883
 venv/bin/python sensor.py --mqtt-host 172.20.10.6 --mqtt-port 1884
+MQTT_HOST=172.20.10.6 venv/bin/python sensor.py              # same via environment variable
 ```
+
+Command-line arguments take precedence over the environment variables `MQTT_HOST` / `MQTT_PORT`.
+
+### Run as a systemd service
+
+For normal operation, `sensor.py` runs as the systemd service `sensorstation`. It starts automatically at boot once the network is up and restarts after 5 seconds if it crashes.
+
+```bash
+cd ~/sensor-station
+./install-service.sh
+```
+
+The script installs the dependencies, creates `~/sensor-station/sensorstation.env` from `sensorstation.env.example` on first run (never overwrites it), copies the unit to `/etc/systemd/system/`, then enables and starts the service. It refuses to run while a manually started `sensor.py` is still running, so two instances never run in parallel. You can run it again after updating the code or the unit.
+
+**Change the broker IP** (e.g. after the hotspot assigned a new address):
+
+```bash
+nano ~/sensor-station/sensorstation.env       # MQTT_HOST=172.20.10.6
+sudo systemctl restart sensorstation
+```
+
+**Everyday commands:**
+
+| Task | Command |
+|------|---------|
+| Status | `systemctl status sensorstation` |
+| Live logs | `journalctl -u sensorstation -f` |
+| Logs since last boot | `journalctl -u sensorstation -b` |
+| Restart (e.g. after updating `sensor.py`) | `sudo systemctl restart sensorstation` |
+| Stop / start | `sudo systemctl stop sensorstation` / `sudo systemctl start sensorstation` |
+| Disable autostart | `sudo systemctl disable --now sensorstation` |
+
+> Stop the service before running `sensor.py` by hand, otherwise both access the sensor and the display at the same time.
+
+What the unit file (`device/sensorstation.service`) does:
+
+| Line | Meaning |
+|------|---------|
+| `Wants=` / `After=network-online.target` | start only once the network is actually up (not just once networking has started) |
+| `User=rashid` | run as a normal user, not as root; the `i2c` group grants access to the sensor |
+| `WorkingDirectory=` | `sensor.py` is started relative to `~/sensor-station` |
+| `EnvironmentFile=` | reads `MQTT_HOST` / `MQTT_PORT` from `sensorstation.env` |
+| `Environment=PYTHONUNBUFFERED=1` | print output reaches the journal immediately instead of in blocks |
+| `ExecStart=…/venv/bin/python sensor.py` | uses the venv's Python, so `luma.oled` and `paho-mqtt` are available |
+| `KillSignal=SIGINT` | stopping works like Ctrl+C: the script disconnects cleanly from the broker |
+| `Restart=on-failure`, `RestartSec=5` | restart 5 s after a crash, but not after a normal stop |
+| `WantedBy=multi-user.target` | `systemctl enable` hooks the service into the normal boot |
 
 ### MQTT
 
@@ -94,7 +148,7 @@ With `--mqtt-host`, every reading is published (QoS 0) to the topic `sensorstati
 {"timestamp": "2026-10-20T15:42:07+02:00", "temperature_c": 23.41, "pressure_hpa": 1012.37, "humidity_pct": 48.2}
 ```
 
-`humidity_pct` is `null` on a BMP280. If the broker is unreachable or the connection drops, measuring and the display keep running; the script prints a note once and reconnects automatically in the background. The broker address is a command-line argument because the IP can change (e.g. on a phone hotspot).
+`humidity_pct` is `null` on a BMP280. If the broker is unreachable or the connection drops, measuring and the display keep running; the script prints a note once and reconnects automatically in the background. The broker address is configurable (argument, environment variable or `sensorstation.env`) because the IP can change (e.g. on a phone hotspot).
 
 To watch the messages on the broker machine:
 
@@ -253,6 +307,7 @@ How it works:
 - [x] Publish readings via **MQTT** (Mosquitto broker)
 - [x] Backend with **FastAPI** + **SQLite**, REST API
 - [x] Web dashboard with history charts
+- [x] Autostart on the Pi as a **systemd** service
 - [ ] Docker Compose, GitHub Actions CI
 
 ---
