@@ -1,0 +1,36 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22
+    restart: unless-stopped
+    ports:
+      - "1883:1883"            # der Pi verbindet sich weiter mit <Laptop-IP>:1883
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+
+  backend:
+    build: ./backend
+    image: sensorstation-backend
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    environment:
+      MQTT_HOST: mosquitto     # Dienstname = Hostname im Compose-Netz
+      MQTT_PORT: "1883"
+      DB_PATH: /data/sensorstation.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend-data:/data
+    healthcheck:
+      # Im slim-Image gibt es kein curl, deshalb Python. 200 auch bei "degraded":
+      # Die API läuft dann noch, nur der Broker fehlt gerade.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  mosquitto-data:
+  backend-data:

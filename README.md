@@ -18,7 +18,9 @@ This is the first stage of a full-stack IoT project: the Pi publishes its readin
 ```
 device/    runs on the Raspberry Pi: BME280 driver, OLED, MQTT publisher, systemd service
 backend/   runs on the laptop: MQTT subscriber, SQLite storage, REST API (FastAPI), web dashboard
+mosquitto/ configuration of the Mosquitto broker container
 docs/      images for this README
+docker-compose.yml   runs Mosquitto and the backend on the laptop
 ```
 
 ---
@@ -173,7 +175,54 @@ BME280 gefunden an Bus 1, Adresse 0x76. Abbrechen mit Strg+C.
 
 The backend runs on the laptop next to the Mosquitto broker. It subscribes to `sensorstation/+/messwerte`, validates every message, stores it in SQLite and serves the data over a REST API and a [web dashboard](#-dashboard).
 
-### Start
+### Start with Docker (recommended)
+
+`docker-compose.yml` runs two containers: the **Mosquitto** broker (`eclipse-mosquitto:2.0.22`, port 1883) and the **backend** (port 8000). Both restart automatically after a crash or a reboot of the laptop, unless you stopped them yourself.
+
+> **Mosquitto must not run as a system service at the same time**, otherwise port 1883 is taken and the container cannot start. Stop and disable it once:
+>
+> ```bash
+> sudo systemctl disable --now mosquitto     # stop now + no autostart at boot
+> systemctl is-active mosquitto              # → inactive
+> ss -ltn | grep 1883                        # → no output, port is free
+> ```
+>
+> To go back: `docker compose down`, then `sudo systemctl enable --now mosquitto`.
+
+```bash
+docker compose up -d --build      # build the backend image and start both containers
+docker compose ps                 # status; the backend shows "healthy" after a few seconds
+```
+
+Dashboard: <http://localhost:8000/>. The Pi keeps sending to `<laptop-ip>:1883` as before, nothing changes on the device.
+
+| Task | Command |
+|------|---------|
+| Status | `docker compose ps` |
+| Live logs (both / one service) | `docker compose logs -f` / `docker compose logs -f backend` |
+| Last 50 lines | `docker compose logs --tail 50 mosquitto` |
+| Watch MQTT messages | `docker compose exec mosquitto mosquitto_sub -t 'sensorstation/#' -v` |
+| Restart after a code change | `docker compose up -d --build` |
+| Stop (containers are removed, data stays) | `docker compose down` |
+| Stop **and delete all data** | `docker compose down -v` |
+
+What is where:
+
+- `backend/Dockerfile`: `python:3.12-slim`, only `requirements.txt` (no test tools), runs as the unprivileged user `sensorstation`, not as root. `backend/.dockerignore` keeps venv, database and caches out of the image.
+- `mosquitto/config/mosquitto.conf`: listener on port 1883 without login (as before, only use it in your own network), logs to stdout so `docker compose logs` shows them.
+- Inside the Compose network the backend reaches the broker by its service name: `MQTT_HOST=mosquitto`.
+- The SQLite database lives in the Docker volume `backend-data` (`/data/sensorstation.db` in the container), Mosquitto's persistence in `mosquitto-data`. Both survive `docker compose down` and rebuilds; only `down -v` deletes them.
+- Healthcheck: every 30 s, `GET /api/health` inside the container. It also counts as healthy when the broker is gone (`"degraded"`), because the API still serves stored data then.
+
+Copy an existing database from `backend/data/` into the volume (once, before the first start):
+
+```bash
+docker compose run --rm --no-deps -v ./backend/data:/import:ro backend cp /import/sensorstation.db /data/
+```
+
+> Docker publishes ports directly via iptables, past `ufw`. Ports 1883 and 8000 are reachable from the whole network the laptop is in.
+
+### Start without Docker
 
 ```bash
 cd backend
@@ -308,7 +357,8 @@ How it works:
 - [x] Backend with **FastAPI** + **SQLite**, REST API
 - [x] Web dashboard with history charts
 - [x] Autostart on the Pi as a **systemd** service
-- [ ] Docker Compose, GitHub Actions CI
+- [x] Mosquitto and backend with **Docker Compose**
+- [ ] GitHub Actions CI
 
 ---
 
