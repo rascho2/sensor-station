@@ -1,8 +1,8 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.messages import Reading
 
-START = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
+START = datetime(2026, 10, 22, 12, 0, tzinfo=UTC)
 URL = "/api/readings/aggregated"
 
 

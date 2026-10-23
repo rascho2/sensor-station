@@ -9,6 +9,7 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
@@ -85,19 +86,20 @@ def create_app(settings=None, start_mqtt=True):
 
     @app.get("/api/readings", response_model=list[ReadingOut])
     def list_readings(
-        limit: int = Query(100, ge=1, le=1000, description="Maximale Anzahl"),
-        since: AwareDatetime | None = Query(
-            None, description="Nur Messungen ab diesem Zeitpunkt (ISO 8601 mit Zeitzone)"),
+        limit: Annotated[int, Query(ge=1, le=1000, description="Maximale Anzahl")] = 100,
+        since: Annotated[AwareDatetime | None, Query(
+            description="Nur Messungen ab diesem Zeitpunkt (ISO 8601 mit Zeitzone)")] = None,
     ):
         """Messungen, neueste zuerst."""
         return db.list_readings(limit=limit, since=since)
 
     @app.get("/api/readings/aggregated", response_model=list[AggregatedReading])
     def aggregated_readings(
-        since: AwareDatetime = Query(
-            description="Nur Messungen ab diesem Zeitpunkt (ISO 8601 mit Zeitzone)"),
-        bucket_seconds: int = Query(60, ge=10, le=86400, description="Breite eines Zeitfensters"),
-        device: str | None = Query(None, description="Nur dieses Gerät"),
+        since: Annotated[AwareDatetime, Query(
+            description="Nur Messungen ab diesem Zeitpunkt (ISO 8601 mit Zeitzone)")],
+        bucket_seconds: Annotated[int, Query(
+            ge=10, le=86400, description="Breite eines Zeitfensters")] = 60,
+        device: Annotated[str | None, Query(description="Nur dieses Gerät")] = None,
     ):
         """Mittelwerte pro Zeitfenster, älteste zuerst (für Diagramme)."""
         return db.aggregate(since=since, bucket_seconds=bucket_seconds, device=device)

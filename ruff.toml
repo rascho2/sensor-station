@@ -1,0 +1,10 @@
+# ruff: Linter für backend/ und device/ (lokal und in der CI).
+# Keine abgeschalteten Regeln, nur Angaben zum Projekt.
+
+# Kleinster gemeinsamer Nenner: Pi mit Raspberry Pi OS Bookworm (Python 3.11),
+# Backend mit 3.12.
+target-version = "py311"
+
+# Die Tests importieren "app" aus backend/. Ohne diese Angabe hält ruff "app"
+# für ein fremdes Paket und will es zwischen fastapi und pytest einsortieren.
+src = ["backend", "device"]

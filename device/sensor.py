@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 sensor.py – Liest einen BME280 bzw. BMP280 über I2C aus und zeigt die
 Werte in der Konsole und (falls vorhanden) auf einem OLED-Display an.
@@ -35,6 +34,7 @@ from smbus2 import SMBus
 # luma.oled ist optional: Fehlt die Bibliothek, läuft das Skript nur mit
 # Konsolenausgabe weiter.
 try:
+    from luma.core.error import Error as LumaError
     from luma.core.interface.serial import i2c as luma_i2c
     from luma.core.render import canvas
     from luma.oled.device import sh1106
@@ -299,7 +299,9 @@ class Anzeige:
         try:
             serial = luma_i2c(port=bus_nr, address=adresse)
             self.device = sh1106(serial, width=128, height=64)
-        except Exception as e:  # z. B. DeviceNotFoundError, OSError
+        # luma meldet "kein Gerät"/"keine Rechte" als eigene Fehler (z. B.
+        # DeviceNotFoundError), andere I2C-Probleme kommen als OSError durch.
+        except (LumaError, OSError) as e:
             print(f"Hinweis: Kein Display an 0x{adresse:02X} ({e}) – "
                   "nur Konsolenausgabe.")
             return

@@ -15,7 +15,7 @@ damit Lesen und Schreiben sich nicht gegenseitig blockieren.
 
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 SCHEMA = """
@@ -36,7 +36,7 @@ SPALTEN = "device, timestamp, temperature_c, pressure_hpa, humidity_pct"
 
 def als_utc_text(zeitpunkt):
     """Zeitzonenbehafteten datetime -> UTC-ISO-Text, wie er gespeichert wird."""
-    return zeitpunkt.astimezone(timezone.utc).isoformat(timespec="seconds")
+    return zeitpunkt.astimezone(UTC).isoformat(timespec="seconds")
 
 
 class Database:
@@ -62,7 +62,7 @@ class Database:
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (reading.device, als_utc_text(reading.timestamp),
                  reading.temperature_c, reading.pressure_hpa,
-                 reading.humidity_pct, als_utc_text(datetime.now(timezone.utc))),
+                 reading.humidity_pct, als_utc_text(datetime.now(UTC))),
             )
 
     def latest(self):
@@ -115,7 +115,7 @@ class Database:
         with closing(self._verbinden()) as v:
             zeilen = [dict(z) for z in v.execute(sql, parameter)]
         for z in zeilen:
-            z["bucket_start"] = datetime.fromtimestamp(z["bucket_start"], timezone.utc)
+            z["bucket_start"] = datetime.fromtimestamp(z["bucket_start"], UTC)
         return zeilen
 
     def ping(self):

@@ -1,5 +1,7 @@
 # IoT Sensor Station 🌡️
 
+[![CI](https://github.com/rascho2/sensor-station/actions/workflows/ci.yml/badge.svg)](https://github.com/rascho2/sensor-station/actions/workflows/ci.yml)
+
 A Raspberry Pi Zero W that measures **temperature, humidity and air pressure** with a Bosch BME280 and shows the live readings on a small OLED display.
 The BME280 driver is written from scratch on top of raw I2C register access, including the sensor's factory calibration.
 
@@ -300,6 +302,22 @@ venv/bin/pytest
 
 The tests use a temporary SQLite file per test and never need a broker: message parsing is tested directly, the MQTT callbacks are called with fake client/message objects, and the API runs with `start_mqtt=False` through FastAPI's `TestClient`.
 
+### Lint and CI
+
+```bash
+backend/venv/bin/ruff check backend/ device/          # --fix applies the safe fixes
+```
+
+`ruff.toml` in the repo root configures ruff for both folders (Python 3.11 as target because of the Pi, `app` as own package for the import order). The ruff version is pinned in `requirements-dev.txt`, CI uses the same one.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request, three jobs in parallel:
+
+| Job | What it checks |
+|-----|----------------|
+| `backend-tests` | Python 3.12, `requirements-dev.txt` (pip cache), `pytest` in `backend/` |
+| `lint` | `ruff check backend/ device/`, findings appear as annotations in the diff |
+| `docker-build` | the backend image builds (not pushed anywhere) |
+
 ---
 
 ## 📊 Dashboard
@@ -358,7 +376,7 @@ How it works:
 - [x] Web dashboard with history charts
 - [x] Autostart on the Pi as a **systemd** service
 - [x] Mosquitto and backend with **Docker Compose**
-- [ ] GitHub Actions CI
+- [x] **GitHub Actions** CI: tests, lint, Docker build
 
 ---
 

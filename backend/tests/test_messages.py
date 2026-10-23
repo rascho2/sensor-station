@@ -60,8 +60,8 @@ def test_invalid_topic(topic):
     (payload(temperature_c=150.0), "außerhalb Messbereich"),
     (payload(humidity_pct=-1.0), "Feuchte negativ"),
     (payload(pressure_hpa=0.0), "Druck 0"),
-    (b'{"timestamp": "2026-10-22T15:36:20+02:00", "temperature_c": NaN, '
-     b'"pressure_hpa": 1002.0, "humidity_pct": 50.0}', "NaN"),
+    ((b'{"timestamp": "2026-10-22T15:36:20+02:00", "temperature_c": NaN, '
+      b'"pressure_hpa": 1002.0, "humidity_pct": 50.0}'), "NaN"),
     (json.dumps({"timestamp": "2026-10-22T15:36:20+02:00",
                  "temperature_c": 26.0, "pressure_hpa": 1002.0}).encode(),
      "humidity_pct fehlt"),

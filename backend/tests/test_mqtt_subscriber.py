@@ -5,8 +5,8 @@ import os
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from paho.mqtt.reasoncodes import ReasonCode
 from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.reasoncodes import ReasonCode
 
 from app.config import Settings
 from app.mqtt_subscriber import MqttSubscriber
