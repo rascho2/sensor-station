@@ -3,7 +3,7 @@
 A Raspberry Pi Zero W that measures **temperature, humidity and air pressure** with a Bosch BME280 and shows the live readings on a small OLED display.
 The BME280 driver is written from scratch on top of raw I2C register access, including the sensor's factory calibration.
 
-This is the first stage of a full-stack IoT project: the Pi publishes its readings via MQTT, and a FastAPI backend on the laptop stores them in SQLite and serves them over a REST API. Next comes a web dashboard (see [Roadmap](#-roadmap)).
+This is the first stage of a full-stack IoT project: the Pi publishes its readings via MQTT, and a FastAPI backend on the laptop stores them in SQLite and serves them over a REST API and a live web dashboard (see [Roadmap](#-roadmap)).
 
 <p align="center">
   <img src="docs/images/demo.gif" alt="Live readings on the OLED display" width="45%">
@@ -17,7 +17,7 @@ This is the first stage of a full-stack IoT project: the Pi publishes its readin
 
 ```
 device/    runs on the Raspberry Pi: BME280 driver, OLED, MQTT publisher
-backend/   runs on the laptop: MQTT subscriber, SQLite storage, REST API (FastAPI)
+backend/   runs on the laptop: MQTT subscriber, SQLite storage, REST API (FastAPI), web dashboard
 docs/      images for this README
 ```
 
@@ -117,7 +117,7 @@ BME280 gefunden an Bus 1, Adresse 0x76. Abbrechen mit Strg+C.
 
 ## 🖥️ Backend
 
-The backend runs on the laptop next to the Mosquitto broker. It subscribes to `sensorstation/+/messwerte`, validates every message, stores it in SQLite and serves the data over a REST API.
+The backend runs on the laptop next to the Mosquitto broker. It subscribes to `sensorstation/+/messwerte`, validates every message, stores it in SQLite and serves the data over a REST API and a [web dashboard](#-dashboard).
 
 ### Start
 
@@ -128,7 +128,7 @@ venv/bin/pip install -r requirements.txt        # requirements-dev.txt for the t
 venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Interactive API docs (Swagger UI): <http://localhost:8000/docs>
+Dashboard: <http://localhost:8000/> · interactive API docs (Swagger UI): <http://localhost:8000/docs>
 
 Configuration via environment variables:
 
@@ -150,12 +150,16 @@ MQTT_HOST=192.168.1.20 DB_PATH=/var/lib/sensorstation.db venv/bin/uvicorn app.ma
 | `GET /api/health` | `{"status": "ok" \| "degraded", "database": true, "mqtt_connected": true}` |
 | `GET /api/readings/latest` | newest reading, `404` if there is none yet |
 | `GET /api/readings?limit=100&since=<ISO 8601>` | readings, newest first; `limit` 1–1000 (default 100), `since` is inclusive and must include a time zone |
+| `GET /api/readings/aggregated?since=<ISO 8601>&bucket_seconds=60` | averages per time window, oldest first, for charts; `since` required, `bucket_seconds` 10–86400 (default 60), optional `device`. Each entry has `bucket_start`, `count` and the averaged values. Windows without readings are left out |
 
 ```bash
 curl localhost:8000/api/readings/latest
 # {"device":"sensorpi","timestamp":"2026-10-22T13:47:00Z","temperature_c":25.92,"pressure_hpa":1002.31,"humidity_pct":63.5}
 
 curl -G localhost:8000/api/readings --data-urlencode "since=2026-10-22T15:00:00+02:00"
+
+curl -G localhost:8000/api/readings/aggregated --data-urlencode "since=2026-10-22T00:00:00Z" -d bucket_seconds=300
+# [{"device":"sensorpi","bucket_start":"2026-10-22T13:50:00Z","count":28,"temperature_c":26.04,"pressure_hpa":1002.33,"humidity_pct":62.5}, ...]
 ```
 
 Timestamps are returned in UTC. In a URL, a `+` in the time zone offset must be encoded as `%2B` (`--data-urlencode` does that), or use `Z` for UTC.
@@ -171,14 +175,17 @@ device/sensor.py ──MQTT/JSON──▶ Mosquitto ──▶ backend (one Pytho
                                                 │                  → db.py ──write──▶ SQLite
                                                 └─ uvicorn:      main.py (FastAPI)
                                                                    → db.py ◀──read── SQLite
+                                                                   → static/ (dashboard)
                                                                         ▲
-                                              curl / dashboard ──HTTP───┘
+                                         browser / curl ──HTTP/JSON─────┘
 ```
 
 - `app/mqtt_subscriber.py`: a paho-mqtt client running in a background thread. It connects asynchronously, so the API also starts when no broker is running, and it reconnects automatically. It re-subscribes after every reconnect. Every exception in the message callback is caught, because an uncaught one would stop the MQTT thread for good.
 - `app/messages.py`: turns topic + raw bytes into a validated `Reading`. The device name comes from the topic. The payload is checked with a strict pydantic model: no strings as numbers, time zone required, values within the BME280's measuring range. Invalid messages are logged and skipped. This module knows nothing about MQTT, which makes it testable without a broker.
 - `app/db.py`: plain `sqlite3`. All timestamps are normalised to UTC before storing, so they sort and compare correctly as text. One short-lived connection per operation and WAL mode let the MQTT thread write while API requests read.
-- `app/main.py`: FastAPI app factory. The *lifespan* creates the schema and starts/stops the subscriber with the server. Query parameters and responses are validated by FastAPI (`422` on bad input).
+- `app/db.py` also does the aggregation for the charts in SQL: timestamp → Unix seconds, integer-divided by the window size, then `GROUP BY` with `AVG()`. 24 hours of data (~43,000 readings at one every 2 s) become at most 288 rows at 5-minute windows, without loading the raw data into Python.
+- `app/main.py`: FastAPI app factory. The *lifespan* creates the schema and starts/stops the subscriber with the server. Query parameters and responses are validated by FastAPI (`422` on bad input). The dashboard in `app/static/` is mounted at `/` after the API routes, so `/api/...` and `/docs` keep priority.
+- The MQTT client ID contains hostname and process ID. Two backend instances with the same ID would keep kicking each other off the broker.
 
 ### Tests
 
@@ -189,6 +196,32 @@ venv/bin/pytest
 ```
 
 The tests use a temporary SQLite file per test and never need a broker: message parsing is tested directly, the MQTT callbacks are called with fake client/message objects, and the API runs with `start_mqtt=False` through FastAPI's `TestClient`.
+
+---
+
+## 📊 Dashboard
+
+<p align="center">
+  <!-- TODO: add screenshot -->
+  <img src="docs/images/dashboard.png" alt="Web dashboard with live values and history charts" width="80%">
+</p>
+
+The backend serves a live dashboard at <http://localhost:8000/> (from a phone in the same network: `http://<laptop-ip>:8000/`, start uvicorn with `--host 0.0.0.0`).
+
+- Three tiles with the current temperature, humidity and pressure and the time of the last reading
+- History charts for 1 h, 6 h or 24 h ([Chart.js](https://www.chartjs.org/) 4.5.1)
+- Updates every 5 seconds
+- Status: green **Live** if the backend is connected to the broker and the last reading is less than 30 seconds old; otherwise a clear warning such as *"Sensor offline seit 22.10., 15:57:07"* or *"Broker getrennt"*, and the tiles are greyed out
+- Gaps in the data (sensor switched off) show as gaps in the charts instead of a straight line
+- Responsive layout for phones, follows the system's dark mode
+
+Plain HTML, CSS and JavaScript in `backend/app/static/`, no build step and no framework. Chart.js is loaded from the jsDelivr CDN with a pinned version and a [Subresource Integrity](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) hash, so the browser rejects any file that does not match that exact version. Without internet access, the tiles and the status still work and the charts show a notice.
+
+How it works:
+
+1. Every 5 s, `app.js` fetches `/api/health` and `/api/readings/latest` in parallel → tiles and status.
+2. Then `/api/readings/aggregated` for the selected range: 1 h → 30 s windows, 6 h → 2 min, 24 h → 5 min (120–290 points per chart).
+3. The next round is scheduled only after the previous one has finished (`setTimeout` instead of `setInterval`), so slow responses do not pile up. Responses from before a range switch are discarded.
 
 ---
 
@@ -219,7 +252,7 @@ The tests use a temporary SQLite file per test and never need a broker: message 
 - [x] Show readings on the OLED
 - [x] Publish readings via **MQTT** (Mosquitto broker)
 - [x] Backend with **FastAPI** + **SQLite**, REST API
-- [ ] Web dashboard with history charts
+- [x] Web dashboard with history charts
 - [ ] Docker Compose, GitHub Actions CI
 
 ---

@@ -1,0 +1,182 @@
+/* Farben als Variablen: Dark Mode überschreibt nur diese, app.js liest
+   sie für die Diagramme aus. */
+:root {
+  --hintergrund: #f4f5f7;
+  --flaeche: #ffffff;
+  --rand: #e2e4e9;
+  --text: #1c1f24;
+  --text-leise: #646b76;
+  --gitter: #e9ebef;
+  --temperatur: #e2553f;
+  --feuchte: #2f80d1;
+  --druck: #7a5cc7;
+  --ok: #1f9d55;
+  --warnung: #c97a00;
+  --fehler: #d23c3c;
+  --fehler-flaeche: #fdecec;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --hintergrund: #111317;
+    --flaeche: #1b1e24;
+    --rand: #2b2f37;
+    --text: #e8eaed;
+    --text-leise: #9aa1ab;
+    --gitter: #262a31;
+    --temperatur: #ff7a63;
+    --feuchte: #5aa7f0;
+    --druck: #a78bfa;
+    --ok: #3ccf7a;
+    --warnung: #f0a830;
+    --fehler: #ff6b6b;
+    --fehler-flaeche: #3a1d1f;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0 auto;
+  max-width: 1100px;
+  padding: 20px 16px 32px;
+  background: var(--hintergrund);
+  color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+h1, h2 { margin: 0; font-weight: 600; }
+h1 { font-size: 1.5rem; }
+a { color: var(--feuchte); }
+
+/* --- Kopfzeile mit Status ------------------------------------------------ */
+.kopf {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.geraet { margin: 0; color: var(--text-leise); font-size: 0.9rem; }
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--rand);
+  border-radius: 999px;
+  background: var(--flaeche);
+  font-size: 0.9rem;
+}
+.punkt {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--text-leise);
+}
+.status[data-zustand="ok"] .punkt { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+.status[data-zustand="warnung"] .punkt { background: var(--warnung); }
+.status[data-zustand="fehler"] .punkt { background: var(--fehler); }
+
+.hinweis {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--fehler);
+  border-left-width: 5px;
+  border-radius: 8px;
+  background: var(--fehler-flaeche);
+  font-weight: 500;
+}
+
+/* --- Kacheln --------------------------------------------------------------- */
+.kacheln {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.kachel {
+  padding: 16px;
+  border: 1px solid var(--rand);
+  border-radius: 12px;
+  background: var(--flaeche);
+}
+.kachel h2 {
+  color: var(--text-leise);
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.kachel:nth-child(1) { border-top: 4px solid var(--temperatur); }
+.kachel:nth-child(2) { border-top: 4px solid var(--feuchte); }
+.kachel:nth-child(3) { border-top: 4px solid var(--druck); }
+
+.wert {
+  margin: 4px 0 0;
+  font-size: 2.4rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.einheit { margin-left: 4px; color: var(--text-leise); font-size: 1.1rem; font-weight: 400; }
+/* Veraltete Werte bleiben sichtbar, aber ausgegraut */
+body.veraltet .wert { opacity: 0.45; }
+
+.zeitpunkt { margin: 8px 0 24px; color: var(--text-leise); font-size: 0.9rem; }
+
+/* --- Verlauf ----------------------------------------------------------------- */
+.verlauf-kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.verlauf-kopf h2 { font-size: 1.15rem; }
+
+.umschalter {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--rand);
+  border-radius: 8px;
+  background: var(--flaeche);
+}
+.umschalter button {
+  padding: 5px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-leise);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.umschalter button[aria-pressed="true"] { background: var(--text); color: var(--flaeche); }
+
+.diagramme { display: grid; gap: 12px; }
+.leer { margin: 0 0 12px; color: var(--text-leise); font-style: italic; }
+.diagramm {
+  margin: 0;
+  padding: 12px 12px 8px;
+  border: 1px solid var(--rand);
+  border-radius: 12px;
+  background: var(--flaeche);
+}
+.diagramm figcaption { color: var(--text-leise); font-size: 0.85rem; margin-bottom: 4px; }
+/* Chart.js braucht einen Container mit fester Höhe (maintainAspectRatio: false) */
+.leinwand { position: relative; height: 200px; }
+
+.fuss { margin-top: 24px; color: var(--text-leise); font-size: 0.85rem; text-align: center; }
+
+/* --- Handy ---------------------------------------------------------------- */
+@media (max-width: 640px) {
+  .kacheln { grid-template-columns: 1fr; gap: 8px; }
+  .kachel { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; }
+  .wert { margin: 0; }
+  .kachel:nth-child(n) { border-top: 1px solid var(--rand); border-left: 4px solid; }
+  .kachel:nth-child(1) { border-left-color: var(--temperatur); }
+  .kachel:nth-child(2) { border-left-color: var(--feuchte); }
+  .kachel:nth-child(3) { border-left-color: var(--druck); }
+  .wert { font-size: 1.8rem; }
+  .leinwand { height: 170px; }
+}

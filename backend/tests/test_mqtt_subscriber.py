@@ -1,6 +1,7 @@
 """Tests für die MQTT-Callbacks – ohne Broker: Die Callbacks werden direkt
 mit nachgebauten Client-/Nachrichtenobjekten aufgerufen."""
 
+import os
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -51,3 +52,10 @@ def test_database_error_is_logged_not_raised(db, caplog):
     db.insert_reading = Mock(side_effect=OSError("Platte voll"))
     MqttSubscriber(Settings(), db)._on_message(None, None, nachricht(GUELTIG))  # kein raise
     assert "Fehler beim Verarbeiten" in caplog.text
+
+
+def test_client_id_is_unique_per_process(db):
+    # Gleiche Client-ID = Broker trennt die ältere Verbindung
+    client_id = MqttSubscriber(Settings(), db).client._client_id.decode()
+    assert client_id.startswith("sensorstation-backend-")
+    assert client_id.endswith(f"-{os.getpid()}")

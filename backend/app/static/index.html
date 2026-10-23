@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Sensorstation</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌡️</text></svg>">
+  <link rel="stylesheet" href="style.css">
+  <!-- Feste Version + SRI-Hash: Der Browser verweigert die Datei, falls das CDN
+       etwas anderes ausliefert als genau diese Version. -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"
+          integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
+          crossorigin="anonymous" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="kopf">
+    <div>
+      <h1>Sensorstation</h1>
+      <p class="geraet" id="geraet">–</p>
+    </div>
+    <div class="status" id="status" role="status" aria-live="polite">
+      <span class="punkt" aria-hidden="true"></span>
+      <span id="status-text">Verbinde …</span>
+    </div>
+  </header>
+
+  <div class="hinweis" id="hinweis" hidden></div>
+
+  <main>
+    <section class="kacheln" aria-label="Aktuelle Werte">
+      <article class="kachel">
+        <h2>Temperatur</h2>
+        <p class="wert"><span id="wert-temperatur">–</span><span class="einheit">°C</span></p>
+      </article>
+      <article class="kachel">
+        <h2>Luftfeuchte</h2>
+        <p class="wert"><span id="wert-feuchte">–</span><span class="einheit">%</span></p>
+      </article>
+      <article class="kachel">
+        <h2>Luftdruck</h2>
+        <p class="wert"><span id="wert-druck">–</span><span class="einheit">hPa</span></p>
+      </article>
+    </section>
+    <p class="zeitpunkt">Letzte Messung: <time id="letzte-messung">–</time></p>
+
+    <section aria-label="Verlauf">
+      <div class="verlauf-kopf">
+        <h2>Verlauf</h2>
+        <div class="umschalter" role="group" aria-label="Zeitraum">
+          <button type="button" data-zeitraum="1h">1 h</button>
+          <button type="button" data-zeitraum="6h">6 h</button>
+          <button type="button" data-zeitraum="24h">24 h</button>
+        </div>
+      </div>
+      <p class="leer" id="leer" hidden>Keine Messwerte im gewählten Zeitraum.</p>
+      <div class="diagramme">
+        <figure class="diagramm"><figcaption>Temperatur (°C)</figcaption>
+          <div class="leinwand"><canvas id="chart-temperatur"></canvas></div></figure>
+        <figure class="diagramm"><figcaption>Luftfeuchte (%)</figcaption>
+          <div class="leinwand"><canvas id="chart-feuchte"></canvas></div></figure>
+        <figure class="diagramm"><figcaption>Luftdruck (hPa)</figcaption>
+          <div class="leinwand"><canvas id="chart-druck"></canvas></div></figure>
+      </div>
+    </section>
+  </main>
+
+  <footer class="fuss">
+    Aktualisiert alle 5 Sekunden · <a href="/docs">API-Dokumentation</a>
+  </footer>
+</body>
+</html>

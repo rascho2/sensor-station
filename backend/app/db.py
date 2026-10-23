@@ -85,6 +85,39 @@ class Database:
         with closing(self._verbinden()) as v:
             return [dict(z) for z in v.execute(sql, parameter)]
 
+    def aggregate(self, since, bucket_seconds, device=None):
+        """Mittelwerte pro Zeitfenster ab `since`, älteste zuerst.
+
+        Die Fenster werden komplett in SQLite gebildet: Zeitstempel ->
+        Unix-Sekunden, ganzzahlig durch die Fensterbreite teilen und wieder
+        multiplizieren ergibt den Fensterbeginn, danach GROUP BY. So kommen
+        bei 24 h und 60-s-Fenstern höchstens 1440 Zeilen pro Gerät zurück
+        statt ~43 000 Einzelmessungen. Fenster ohne Messungen fehlen.
+        (strftime('%s') statt unixepoch(), weil Ubuntu 22.04 nur SQLite 3.37
+        mitbringt und unixepoch() erst ab 3.38 existiert.)
+        """
+        sql = """
+            SELECT device,
+                   CAST(strftime('%s', timestamp) AS INTEGER) / :bucket * :bucket
+                       AS bucket_start,
+                   COUNT(*)                     AS count,
+                   ROUND(AVG(temperature_c), 2) AS temperature_c,
+                   ROUND(AVG(pressure_hpa), 2)  AS pressure_hpa,
+                   ROUND(AVG(humidity_pct), 1)  AS humidity_pct  -- NULLs zählen nicht
+            FROM readings
+            WHERE timestamp >= :since
+        """
+        parameter = {"bucket": bucket_seconds, "since": als_utc_text(since)}
+        if device is not None:
+            sql += " AND device = :device"
+            parameter["device"] = device
+        sql += " GROUP BY device, bucket_start ORDER BY bucket_start, device"
+        with closing(self._verbinden()) as v:
+            zeilen = [dict(z) for z in v.execute(sql, parameter)]
+        for z in zeilen:
+            z["bucket_start"] = datetime.fromtimestamp(z["bucket_start"], timezone.utc)
+        return zeilen
+
     def ping(self):
         """True, wenn die Datenbank erreichbar ist (für /api/health)."""
         try:

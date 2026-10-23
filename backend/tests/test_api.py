@@ -1,21 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from fastapi.testclient import TestClient
 
-from app.config import Settings
-from app.main import create_app
 from app.messages import Reading
 
 START = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
-
-
-@pytest.fixture
-def client(db):
-    """API gegen die Test-Datenbank, ohne MQTT-Verbindung."""
-    app = create_app(Settings(db_path=db.pfad), start_mqtt=False)
-    with TestClient(app) as c:   # "with" führt den lifespan aus
-        yield c
 
 
 def speichere(db, anzahl):

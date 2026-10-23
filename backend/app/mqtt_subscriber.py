@@ -8,6 +8,8 @@ blockiert also weder den Start noch die API.
 """
 
 import logging
+import os
+import socket
 
 import paho.mqtt.client as mqtt
 
@@ -20,8 +22,12 @@ class MqttSubscriber:
     def __init__(self, settings, db):
         self.settings = settings
         self.db = db
-        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
-                                  client_id="sensorstation-backend")
+        # Client-ID muss pro Verbindung eindeutig sein: Meldet sich ein zweiter
+        # Client mit derselben ID an, wirft der Broker den ersten raus – zwei
+        # Backend-Instanzen würden sich dann im Sekundentakt gegenseitig trennen.
+        self.client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=f"sensorstation-backend-{socket.gethostname()}-{os.getpid()}")
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
